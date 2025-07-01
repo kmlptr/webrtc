@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kontrol Kamera Raspberry Pi</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .navbar {
+            background-color: #1d5c9c;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .connection-controls,
+        .video-container,
+        .stats-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #videoFeed {
+            width: 100%;
+            max-height: 500px;
+            background-color: #000;
+            border-radius: 5px;
+            display: block;
+            margin: 0 auto;
+        }
+        .input-group {
+            margin-bottom: 1px;
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 15px;
+            margin: 8px 0;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            transition: border 0.3s;
+        }
+        input[type="text"]:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        #connectButton,
+        #disconnectButton {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            flex: 1;
+        }
+        #connectButton {
+            background-color: #3498db;
+            color: white;
+        }
+        #disconnectButton {
+            background-color: #e74c3c;
+            color: white;
+            display: none;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #connectionStatus,
+        #error {
+            margin-top: 15px;
+            font-weight: bold;
+            text-align: center;
+        }
+        #error {
+            color: #e74c3c;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .stat-item {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        @media (max-width: 600px) {
+            .button-group {
+                flex-direction: column;
+            }
+            #connectButton, #disconnectButton {
+                width: 100%;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <section class="navbar">
+            <h1 class="univ">
+                Kamil Maulana Putra - Teknik Elektro<br>
+                <hr>
+                Monitoring Kamera Raspberry Pi
+            </h1>
+        </section>
+        <div class="connection-controls">
+            <h2>Koneksi Kamera</h2>
+            <div class="input-group">
+                <input type="text" id="ipInput" placeholder="Masukkan IP Raspberry Pi (contoh: 192.168.1.100)">
+            </div>
+            <div class="button-group">
+                <button id="connectButton">Hubungkan Kamera</button>
+                <button id="disconnectButton">Putuskan Koneksi</button>
+            </div>
+            <div id="connectionStatus"></div>
+            <div id="error"></div>
+        </div>
+        <div class="video-container">
+            <h2>Tampilan Kamera</h2>
+            <img id="videoFeed" src="" alt="Live Feed akan muncul di sini setelah terhubung">
+            <div class="stats-container">
+                <h3>Statistik Jaringan</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <p>Alamat IP: <span id="ipAddressStat">-</span></p>
+                    </div>
+                    <div class="stat-item">
+                        <p>Latency: <span id="latency">-</span></p>
+                    </div>
+                    <div class="stat-item">
+                        <p>Packet Loss: <span id="packetLoss">-</span></p>
+                    </div>
+                    <div class="stat-item">
+                        <p>Jitter: <span id="jitter">-</span></p>
+                    </div>
+                    <div class="stat-item">
+                        <p>Throughput: <span id="throughput">-</span></p>
+                    </div>
+                    <div class="stat-item">
+                        <p>FPS: <span id="fps">-</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const ipInput = document.getElementById('ipInput');
+        const connectButton = document.getElementById('connectButton');
+        const disconnectButton = document.getElementById('disconnectButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const videoFeed = document.getElementById('videoFeed');
+        const errorDisplay = document.getElementById('error');
+        const ipAddressStat = document.getElementById('ipAddressStat');
+        const portStat = { textContent: '5000' };
+
+        let currentIP = '';
+        const currentPort = '5000';
+        let socket = null;
+        let connectionTimeout = null;
+        let frameCount = 0;
+        let fpsInterval = null;
+
+        function validateIP(ip) {
+            const parts = ip.split('.');
+            if (parts.length !== 4) return false;
+            for (const part of parts) {
+                const num = parseInt(part, 10);
+                if (isNaN(num) || num < 0 || num > 255 || part !== num.toString()) return false;
+            }
+            return true;
+        }
+
+        connectButton.addEventListener('click', connectToCamera);
+        disconnectButton.addEventListener('click', disconnectFromCamera);
+        ipInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') connectToCamera();
+        });
+
+        function connectToCamera() {
+            const ipAddress = ipInput.value.trim();
+            if (!validateIP(ipAddress)) {
+                connectionStatus.innerHTML = '<span style="color: red">Format IP tidak valid. Gunakan format X.X.X.X (0-255)</span>';
+                return;
+            }
+            if (socket) socket.disconnect();
+            connectButton.disabled = true;
+            connectionStatus.innerHTML = '<span style="color: blue">Menghubungkan...</span> <div class="loading"></div>';
+            errorDisplay.textContent = '';
+            currentIP = ipAddress;
+            videoFeed.src = `http://${ipAddress}:${currentPort}/video_feed?ts=${Date.now()}`;
+            connectionTimeout = setTimeout(() => onConnectionFailed("Timeout: Perangkat tidak merespon"), 15000);
+            videoFeed.onload = function() {
+                frameCount++;
+                onConnectionSuccess();
+            };
+            videoFeed.onerror = function() {
+                onConnectionFailed("Gagal terhubung ke feed video");
+            };
+        }
+
+        function onConnectionSuccess() {
+            clearTimeout(connectionTimeout);
+            connectionStatus.innerHTML = '<span style="color: green">Terhubung!</span>';
+            connectButton.style.display = 'none';
+            disconnectButton.style.display = 'block';
+            ipAddressStat.textContent = currentIP;
+            portStat.textContent = currentPort;
+            initializeSocketConnection(currentIP, currentPort);
+            saveConnectionInfo(currentIP);
+            fpsInterval = setInterval(() => {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0;
+            }, 1000);
+        }
+
+        function onConnectionFailed(message) {
+            clearTimeout(connectionTimeout);
+            connectionStatus.innerHTML = `<span style="color: red">${message}</span>`;
+            connectButton.disabled = false;
+            connectButton.style.display = 'block';
+            disconnectButton.style.display = 'none';
+            errorDisplay.textContent = 'Pastikan: 1) Server berjalan , 2) Port 5000 terbuka, 3) Tidak ada blok firewall';
+        }
+
+        function disconnectFromCamera() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            videoFeed.src = '';
+            videoFeed.onload = null;
+            videoFeed.onerror = null;
+            connectionStatus.innerHTML = '<span style="color: orange">Koneksi diputuskan</span>';
+            connectButton.style.display = 'block';
+            disconnectButton.style.display = 'none';
+            connectButton.disabled = false;
+            ipAddressStat.textContent = '-';
+            document.getElementById('latency').textContent = '-';
+            document.getElementById('packetLoss').textContent = '-';
+            document.getElementById('jitter').textContent = '-';
+            document.getElementById('throughput').textContent = '-';
+            document.getElementById('fps').textContent = '-';
+            if (fpsInterval) clearInterval(fpsInterval);
+        }
+
+        function initializeSocketConnection(ip, port) {
+            socket = io(`http://${ip}:${port}`);
+            socket.on('network_stats', function(data) {
+                document.getElementById('latency').textContent = data.latency + ' ms';
+                document.getElementById('packetLoss').textContent = data.packetLoss + '%';
+                document.getElementById('jitter').textContent = data.jitter + ' ms';
+                document.getElementById('throughput').textContent = data.bandwidth + ' Mbps';
+                if (data.fps !== undefined) {
+                    document.getElementById('fps').textContent = data.fps;
+                }
+            });
+            socket.on('connect', () => errorDisplay.textContent = '');
+            socket.on('disconnect', () => {
+                errorDisplay.textContent = 'Koneksi terputus. Coba hubungkan kembali.';
+                disconnectFromCamera();
+            });
+            socket.on('connect_error', (err) => {
+                errorDisplay.textContent = 'Koneksi error: ' + err.message;
+                disconnectFromCamera();
+            });
+        }
+
+        function saveConnectionInfo(ip) {
+            localStorage.setItem('lastConnection', JSON.stringify({ ip: ip, timestamp: new Date().getTime() }));
+        }
+
+        function loadLastConnection() {
+            const lastConnection = localStorage.getItem('lastConnection');
+            if (lastConnection) {
+                try {
+                    const conn = JSON.parse(lastConnection);
+                    ipInput.value = conn.ip;
+                } catch (e) {
+                    console.error('Error loading last connection:', e);
+                }
+            }
+        }
+
+        loadLastConnection();
+        ipInput.focus();
+    });
+</script>
+</body>
+</html>
